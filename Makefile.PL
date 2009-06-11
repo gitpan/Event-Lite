@@ -8,6 +8,9 @@ perl_version '5.008001';
 license 'perl';
 all_from 'lib/Event/Lite.pm';
 
+requires      'forks'               => '0.33';
+requires      'forks::shared'       => '0.33';
+requires      'Socket::Class'       => '2.21';
 test_requires 'Test::More'          => '0.77';
 
 tests_recursive();

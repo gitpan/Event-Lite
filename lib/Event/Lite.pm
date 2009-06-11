@@ -4,7 +4,7 @@ package Event::Lite;
 use strict;
 use warnings 'all';
 
-our $VERSION = '0.001';
+our $VERSION = '0.002';
 
 1;# return true:
 

@@ -8,7 +8,13 @@ inc/Module/Install/Metadata.pm
 inc/Module/Install/Win32.pm
 inc/Module/Install/WriteAll.pm
 lib/Event/Lite.pm
+lib/Event/Lite/Publisher.pm
+lib/Event/Lite/Server.pm
+lib/Event/Lite/Subscriber.pm
 Makefile.PL
 MANIFEST
 runtests.sh
 t/000-basic/000-compile.t
+t/000-basic/010-subscribe.t
+t/000-basic/020-publish.t
+t/000-basic/030-pubsub.t
