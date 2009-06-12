@@ -3,8 +3,97 @@ package Event::Lite;
 
 use strict;
 use warnings 'all';
+#use Carp 'confess';
+use base 'Exporter';
+use Event::Lite::Subscriber;
+use Event::Lite::Publisher;
+our $VERSION = '0.003';
+our @EXPORT = qw( addEventListener dispatchEvent );
 
-our $VERSION = '0.002';
+my $publisher;
+my $server_address;
+my $server_port;
+my $username;
+my $password;
+my @subscribers = ( );
+
+my $instance;
+
+#==============================================================================
+sub server
+{
+  my ($class, $server, $user, $pass) = @_;
+  
+  my ($addr,$port) = split /:/, $server;
+  die "Usage: $class\->server( 'hostname:port' [, username, password ] )"
+    unless $addr && $port;
+  $username = $user;
+  $password = $pass;
+  
+  if( $publisher )
+  {
+    eval {
+      $publisher->stop();
+      undef($publisher);
+    };
+  }# end if()
+  
+  $publisher = Event::Lite::Publisher->new(
+    address   => $addr,
+    port      => $port,
+    username  => $username,
+    password  => $password,
+  );
+  $server_address = $addr;
+  $server_port    = $port;
+  
+  $instance = bless {subs => [ ]}, $class;
+}# end server()
+
+
+#==============================================================================
+sub addEventListener
+{
+  my %args = @_;
+  
+  $args{event} && ( ref($args{callback}) eq 'CODE' )
+    or die "Usage: addEventListener( event => 'event-name', callback => sub {...} )";
+  
+  my $sub = Event::Lite::Subscriber->new(
+    address   => $server_address,
+    port      => $server_port,
+    username  => $username,
+    password  => $password,
+  );
+  $sub->subscribe(
+    event     => $args{event},
+    callback  => $args{callback},
+  );
+  push @{$instance->{subs}}, $sub;
+#  push @subscribers, $sub;
+}# end addEventListener()
+
+
+#==============================================================================
+sub dispatchEvent
+{
+  my %args = @_;
+  
+  $args{event} or die "Usage: dispatchEvent( event => 'event-name, [ \%other_args ] )";
+  
+  $publisher->publish(
+    %args
+  );
+}# end dispatchEvent()
+
+
+#==============================================================================
+sub DESTROY
+{
+  my $s = shift;
+  map { eval { $_->DESTROY } } @{$s->{subs}};
+}# end DESTROY()
+
 
 1;# return true:
 
@@ -18,40 +107,84 @@ Event::Lite - Distributed Event Broadcast System for Perl
 
 B<NOTE:> - The synopses are subject to drastic change, as this code is still alpha.
 
+B<WARNING:> - More extensive testing is still underway.  For example, repeated
+subscribe/disconnect scenarios have not been thoroughly tested yet.
+
 =head2 Server
 
-  package MyServer;
-  use base 'Event::Lite::Server';
-  use Carp 'confess';
+  use Event::Lite::Server;
   
-  my $s = __PACKAGE__->new( ... );
+  my $server = Event::Lite::Server->new(
+    # Required params:
+    address => '127.0.0.1',
+    port    => 34343,
+    
+    # Optional params:
+    on_authenticate_publisher => sub {
+      my ($socket, $event_type, $username, $password) = @_;
+      
+      # If the publisher is ok, then return true:
+      return 1;
+    },
+    on_authenticate_subscriber => sub {
+      my ($socket, $event_type, $username, $password) = @_;
+      
+      # If the subscriber is ok, then return true:
+      return 1;
+    },
+  );
   
-  eval { $s->run() };
-  confess "Error: $@";
+  # Install some signal handlers:
+  $SIG{INT} = $SIG{TERM} = sub {
+    return unless $server->running;
+    warn "Shutting down...\n";
+    $server->stop();
+  };
+  
+  $SIG{HUP} = sub {
+    warn "Restarting server on port $port...\n";
+    $server->stop();
+    $server->run();
+  };
+  
+  warn "Starting server on port $port...\n";
+  
+  $server->run();
+  
+  sleep(1) while 1;
+  
+  # Fell out of loop:
+  $server->stop();
 
-=head2 Publisher
+=head2 Subscribing to Events
 
-  my $pub = Event::Lite::Publisher->new( ... );
-  $pub->notify(
-    source  => $self,
-    event   => 'name-of-event',
-    ...
-    # Anything else is passed along as properties of the event
+  # Import the addEventListener and dispatchEvent functions:
+  use Event::Lite;
+  
+  # Just tell Event::Lite where the server is:
+  Event::Lite->server( '127.0.0.1:34343', 'username', 'password' );
+  
+  addEventListener(
+    event     => 'foo',
+    callback  => sub { 
+      my $event = shift;
+      warn "$event->{event} happened: $event->{bar}"; # 'foo happened: Hello World'
+    }
   );
 
-=head2 Subscriber
+=head2 Publishing Events
 
-  package MySubscriber;
-  use base 'Event::Lite::Subscriber';
-  use Carp 'confess';
+  # Import the addEventListener and dispatchEvent functions:
+  use Event::Lite;
   
-  my $s = __PACKAGE__->new( ... );
-  while( my $event = eval { $s->event('name-of-event') } )
-  {
-    # Process our event:
-  }# end while()
+  # Just tell Event::Lite where the server is:
+  Event::Lite->server( '127.0.0.1:34343', 'username', 'password' );
   
-  confess "Fell out of loop: $@";
+  # Then, someplace else, in the same program, different program, same machine or different machine:
+  dispatchEvent(
+    event => 'foo',
+    bar   => 'Hello World'.
+  );
 
 =head1 DESCRIPTION
 
@@ -59,7 +192,10 @@ C<Event::Lite> aims to provide a distributed event broadcast system for Perl.
 
 This means that an event (i.e. Price of Tea in China (PTC) changes) can occur
 in one system, and any number of "subscriber" systems can be instantly notified,
-regardless of whether they are on the same system or network.
+regardless of whether they are on the same system or network (or even written in Perl).
+
+Since sending and receiving events requires only sockets, base64-encoding/decoding and JSON,
+C<Event::Lite> is language-agnostic.
 
 =head2 Architecture
 
@@ -69,41 +205,147 @@ C<Event::Lite> basically has 4 components:
 
 =item * Server
 
-The part responsible for connecting the other 3 parts together.
+The part responsible for connecting subscribers and publishers.
 
 =item * Publisher
 
 The where events are generated.
-
-=item * Event
-
-An object that describes the Who, What, When, Where, Why and How of what happened.
 
 =item * Subscriber
 
 Something that cares about a specific kind of event.  It can expect the server
 to let it know when that kind of event happens.
 
+=item * Event
+
+An object that describes the Who, What, When, Where, Why and How of what happened.
+
+Events are just simple hashrefs - not even blessed.
+
 =back
 
 =head2 Protocol
 
-Because this is supposed to be lightweight and entirely focused on just the event
-broadcast aspect, a simple text-based protocol will be used.  While XMPP might
-be much more robust, this module is designed with simplicity in mind - first and 
-foremost.
+=head3 Subscribe
 
-=head2 Limitations
+A subscribe request looks like this:
 
-One of the goals of C<Event::Lite> is to not have any arbitrary limitations.
+  subscribe/event-name:username|password
 
-I fully expect C<Event::Lite> to scale to thousands of events, thousands of subscribers
-and to perform on par with any commercial system currently out there.
+So, to subscribe to events named "foo" you would send:
 
-I also fully expect C<Event::Lite> to be satisfactory for use in mission-critical
-systems like stock trading platforms, nuclear missile silos and garage door openers.
+  subscribe/foo:admin|swordfish
 
-If you think garage door openers are not mission-critical, think again.
+=head3 Publish
+
+A publish request looks like this:
+
+  publish/event-name:username|password
+  
+  <base64-encoded JSON>
+
+So, to publish an event named "foo" you would send:
+
+  publish/foo:admin|swordfish
+  
+  AB384dsd93jk4j2h3g4jh23g4jh2g34jhg234jhg23jh4g==
+
+=head1 PERFORMANCE
+
+As of version 0.003 C<Event::Lite> offers approximately 500 events per second when
+sending 100 small events (i.e. "hello world" events) to 10 subscribers on the same machine.
+
+The size of the event data, the number of subscribers, and network latency will
+slow that number down.
+
+=head1 BEST PRACTICES
+
+=head2 Use Small Events
+
+Try to keep your events - when serialized - less than 1024**2 bytes.
+
+=head2 Send Events, Not Data
+
+Event::Lite B<is intended for> near-real-time message broadcasts, B<not multicast of large datasets>.
+
+=head2 Security
+
+By default, all events go over the wire encoded, but not encrypted.  Don't send sensitive data
+within the arguments of an event.
+
+=head1 AUTHENTICATION
+
+You can grant or deny access to publishers and subscribers.
+
+The two authenticated types - publishers and subscribers - can be authenticated
+separately.  Authentication can be based on the username, password and event type.
+
+=head2 Authenticating Publishers and Subscribers
+
+When the Server is instantiated, one of the optional arguments is C<on_authenticate_publisher> which
+whould be a code reference.
+
+An example of how to do this is as follows:
+
+  my $server = Event::Lite::Server->new(
+    address => '127.0.0.1',
+    port    => '34343',
+    on_authenticate_publisher   => \&authenticate_publisher,
+    on_authenticate_subscriber  => \&authenticate_subscriber,
+  );
+  
+  # Authenticate a publisher:
+  sub authenticate_publisher {
+    my ($socket, $event_type, $username, $password) = @_;
+    
+    if( is authenticated ) {
+      return 1;
+    }
+    else {
+      return 0;
+    }
+  }
+  
+  # Authenticate a subscriber:
+  sub authenticate_subscriber {
+    my ($socket, $event_type, $username, $password) = @_;
+    
+    if( is authenticated ) {
+      return 1;
+    }
+    else {
+      return 0;
+    }
+  }
+
+Once the server is configured as shown above, publishers and subscribers will always be authenticated.
+
+=head1 PUBLIC METHODS
+
+=head2 Event::Lite->server( address:port, [username, password ])
+
+See synopsis for usage examples.
+
+Defines the connection to the event server.
+
+=head1 EXPORTED FUNCTIONS
+
+=head2 addEventListener( event => event_name, callback => sub {...} )
+
+See the synopsis for usage examples.
+
+B<NOTE:> The callback will be executed in a B<separate thread or process> and may not have
+access to variables in the local context.
+
+Using L<forks::shared> to share variables will get around this limitation.
+
+=head2 dispatchEvent( event => event_name, %misc_args )
+
+The only required parameter is C<event>.
+
+Any other parameters in the hash will be sent just as they are.
+
+B<NOTE:> - Sending of blessed objects, sockets or file handles is not supported.
 
 =head1 SUPPORT
 

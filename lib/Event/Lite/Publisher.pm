@@ -3,9 +3,10 @@ package Event::Lite::Publisher;
 
 use strict;
 use warnings 'all';
-use Carp 'confess';
+#use Carp 'confess';
 use Socket::Class;
-use Storable qw( freeze );
+use JSON::XS;
+#use Storable qw( freeze );
 use MIME::Base64;
 
 
@@ -17,16 +18,29 @@ sub new
   
   foreach(qw( address port ))
   {
-    confess "Required param '$_' was not provided"
+    die "Required param '$_' was not provided"
       unless defined($args{$_});
   }# end foreach()
+  
+  my $credentials = '|';
+  if( $args{username} && $args{password} )
+  {
+    $credentials = join '|', ( $args{username}, $args{password} );
+  }# end if()
   
   my $sock = Socket::Class->new(
     remote_addr => $args{address},
     remote_port => $args{port},
     proto       => 'tcp',
   ) or die "Cannot connect: $!";
-  return bless { %args, sock => $sock }, $class;
+  sleep(2);
+  return bless {
+    %args,
+    sock        => $sock,
+    initialized => 0,
+    json        => JSON::XS->new->utf8->pretty,
+    credentials => $credentials,
+  }, $class;
 }# end new()
 
 
@@ -37,12 +51,14 @@ sub publish
   
   foreach(qw( event ))
   {
-    confess "Required param '$_' was not provided"
+    die "Required param '$_' was not provided"
       unless defined($args{$_});
   }# end foreach()
   
-  my $data = encode_base64( freeze( \%args ) );
-  $s->{sock}->send("publish/$args{event}\n\n$data");
+  my $data = encode_base64( $s->{json}->encode( \%args ) );
+  my $msg = "publish/$args{event}:$s->{credentials}\n\n$data";
+  sleep(2) unless $s->{initialized}++;
+  $s->{sock}->send($msg, 0x8);
   my $buffer;
   my $got = $s->{sock}->read($buffer, 1024 ** 2 );
   if( $buffer ne 'ok' )
@@ -59,6 +75,16 @@ sub stop
   
   $s->{sock}->close();
 }# end stop()
+
+
+#==============================================================================
+sub DESTROY
+{
+  my $s = shift;
+  
+  eval { $s->stop() };
+  undef(%$s);
+}# end DESTROY()
 
 1;# return true:
 

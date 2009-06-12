@@ -18,14 +18,12 @@ my $subscriber = Event::Lite::Subscriber->new(
   address => '127.0.0.1',
   port    => 34343,
 );
-sleep(1);
 
 $subscriber->subscribe(
   event => 'yay',
   callback  => sub { warn "Hello world" }
 );
 
-sleep(5);
 
 $subscriber->stop();
 $server->stop();

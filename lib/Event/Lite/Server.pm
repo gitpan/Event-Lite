@@ -3,7 +3,7 @@ package Event::Lite::Server;
 
 use strict;
 use warnings 'all';
-use Carp 'confess';
+#use Carp 'confess';
 use IO::Socket::INET;
 use IO::Select;
 use forks;
@@ -21,9 +21,12 @@ sub new
   
   foreach(qw( address port ))
   {
-    confess "Required param '$_' was not provided"
+    die "Required param '$_' was not provided"
       unless defined($args{$_});
   }# end foreach()
+  
+  $args{on_authenticate_subscriber} ||= sub { 1 };
+  $args{on_authenticate_publisher}  ||= sub { 1 };
   
   return bless \%args, $class;
 }# end new()
@@ -45,21 +48,16 @@ sub run
     
     my $read_set = IO::Select->new();
     $read_set->add( $server );
-    while( $RUNNING ) {
+    LOOP: while( $RUNNING ) {
       my ($readable_handles) = IO::Select->select($read_set, undef, undef, 0.25);
-      unless( $readable_handles )
-      {
-        usleep( 10000 );
-        next;
-      }# end unless()
-      foreach my $rh ( @$readable_handles )
+      HANDLE: foreach my $rh ( @$readable_handles )
       {
         if( $rh == $server )
         {
           # New socket:
           $read_set->add( $rh->accept() );
-        }
-        else
+        }# end if()
+        
         {
           # Message from existing socket:
           my $buffer;
@@ -68,39 +66,43 @@ sub run
           {
             unless( length($buffer) )
             {
-              next;
+              usleep( 10000 );
+              next HANDLE;
             }# end unless()
             
-            # Got input:
-#            warn "Received [[$buffer]]";
-            $rh->send('ok');
-            
+            # Got input:            
             # Now handle the message:
             my ($type) = $buffer =~ m{^(\w+)/};
             if( $type eq 'subscribe' )
             {
               # Remember the handle for later:
-              my (undef, $event_type) = split /\//, $buffer;
-              chomp($event_type);
-              handle_subscribe( $rh, $event_type );
+              my ($event_type, $credentials) = $buffer =~ m{^.*?/(.*?):(.*)$};
+              chomp($credentials);
+              my ($username, $password) = split /\|/, $credentials;
+              if( $s->check_subscriber_credentials( $rh, $event_type, $username, $password ) )
+              {
+                $s->handle_subscribe( $rh, $event_type );
+              }
+              else
+              {
+                $s->deny_subscriber( $rh, $event_type, $username, $password );
+                next HANDLE;
+              }# end if()
             }
             elsif( $type eq 'publish' )
             {
-              # Tell all the subscribers that their event has happened:
-              my ($header, $body) = split /\n\n/, $buffer;
-              my (undef, $event_type) = split /\//, $header;
-              chomp($event_type);
-              my @writable = $read_set->can_write();
-              my %can_write = map { $_ => 1 } @writable;
-#use Data::Dumper;
-#warn "Event type '$event_type' subscribers: " . Dumper( $subscribers{$event_type} );
-
-              foreach my $subs ( @{$subscribers{$event_type}} )
+              my ($event_type,$credentials) = $buffer =~ m{^.*?/(.*?):([^\r\n]+)};
+              chomp($credentials);
+              my ($username, $password) = split /\|/, $credentials;
+              if( $s->check_publisher_credentials( $rh, $event_type, $username, $password ) )
               {
-                next unless grep { $_ eq $subs } keys %can_write;
-#                warn "Telling $subs about the $event_type event";
-                $subs->send( $body );
-              }# end foreach()
+                $s->publish_event( $rh, $buffer, $read_set );
+              }
+              else
+              {
+                $s->deny_publisher( $rh, $event_type, $username, $password );
+                next HANDLE;
+              }# end if()
             }
             else
             {
@@ -115,19 +117,87 @@ sub run
           }# end if()
         }# end if()
       }# end foreach()
+      
     }# end while()
   }; warn $@ if $@;});
+  
+  sleep(1);
 }# end run()
 
 
 #==============================================================================
 sub handle_subscribe
 {
-  my ($handle, $event_type) = @_;
+  my ($s, $handle, $event_type) = @_;
   
   $subscribers{$event_type} ||= [ ];
   push @{$subscribers{$event_type}}, $handle;
+  
+  $handle->send('ok');
 }# end handle_subscribe()
+
+
+#==============================================================================
+sub check_publisher_credentials
+{
+  my ($s, $socket, $event_type, $username, $password) = @_;
+  
+  return $s->{on_authenticate_publisher}->( $socket, $event_type, $username, $password );
+}# end check_publisher_credentials()
+
+
+#==============================================================================
+sub deny_publisher
+{
+  my ($s, $socket, $event_type, $username, $password) = @_;
+  
+  $socket->send( 'permission denied' );
+  
+  return 1;
+}# end deny_publisher()
+
+
+#==============================================================================
+sub check_subscriber_credentials
+{
+  my ($s, $socket, $event_type, $username, $password) = @_;
+  
+  return $s->{on_authenticate_subscriber}->( $socket, $event_type, $username, $password );
+}# end check_subscriber_credentials()
+
+
+#==============================================================================
+sub deny_subscriber
+{
+  my ($s, $socket, $event_type, $username, $password) = @_;
+  
+  $socket->send( 'permission denied' );
+  return 1;
+}# end deny_subscriber()
+
+
+#==============================================================================
+sub publish_event
+{
+  my ($s, $socket, $buffer, $read_set) = @_;
+  
+  $socket->send( 'ok' );
+  
+  # Tell all the subscribers that their event has happened:
+  my ($header, @body) = split /\n\n/, $buffer;
+  my (undef, $event_type) = split /\//, $header;
+  ($event_type) = split /:/, $event_type;
+  chomp($event_type);
+  my @writable = $read_set->can_write();
+  my %can_write = map { $_ => 1 } @writable;
+  my $body = join "\n\n", @body;
+  foreach my $subs ( @{$subscribers{$event_type}} )
+  {
+    next unless grep { $_ eq $subs } keys %can_write;
+    $subs->send( "$body\n\n" );
+  }# end foreach()
+  
+}# end publish_event()
 
 
 #==============================================================================
@@ -135,10 +205,26 @@ sub stop
 {
   my $s = shift;
   
-  $RUNNING = 0;
-  warn "Shutting down...\n";
+  SCOPE: {
+    lock($RUNNING);
+    $RUNNING = 0;
+  };
   $s->{worker}->join;
 }# end stop()
+
+
+#==============================================================================
+sub running { {lock($RUNNING); return $RUNNING } }
+
+
+#==============================================================================
+sub DESTROY
+{
+  my $s = shift;
+  
+  eval { $s->stop } if $s->{worker};
+  undef(%$s);
+}# end DESTROY()
 
 1;# return true:
 

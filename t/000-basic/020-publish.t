@@ -13,13 +13,11 @@ my $server = Event::Lite::Server->new(
 );
 
 $server->run();
-sleep(1);
 
 my $publisher = Event::Lite::Publisher->new(
   address => '127.0.0.1',
   port    => 34343,
 );
-sleep(1);
 
 $publisher->publish(
   event => 'test-event',
