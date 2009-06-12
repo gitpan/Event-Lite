@@ -28,15 +28,8 @@ sub new
     $credentials = join '|', ( $args{username}, $args{password} );
   }# end if()
   
-  my $sock = Socket::Class->new(
-    remote_addr => $args{address},
-    remote_port => $args{port},
-    proto       => 'tcp',
-  ) or die "Cannot connect: $!";
-  sleep(2);
   return bless {
     %args,
-    sock        => $sock,
     initialized => 0,
     json        => JSON::XS->new->utf8->pretty,
     credentials => $credentials,
@@ -57,15 +50,51 @@ sub publish
   
   my $data = encode_base64( $s->{json}->encode( \%args ) );
   my $msg = "publish/$args{event}:$s->{credentials}\n\n$data";
-  sleep(2) unless $s->{initialized}++;
+
+  unless( eval { $s->{sock} && $s->{sock}->remote_addr } )
+  {
+    $s->reconnect()
+      or die "Cannot reconnect!";
+  }# end unless()
+  
   $s->{sock}->send($msg, 0x8);
   my $buffer;
-  my $got = $s->{sock}->read($buffer, 1024 ** 2 );
-  if( $buffer ne 'ok' )
-  {
-    warn "Unexpected response '$buffer' from server";
-  }# end if()
+  
+  TRY: {
+    my $got = $s->{sock}->read($buffer, 1024 ** 2 );
+    unless( defined $got )
+    {
+      return;
+#      warn "Disconnecting";
+#      eval { $s->{sock}->close };
+#      last TRY;
+    }# end unless()
+    unless( $got )
+    {
+      $s->{sock}->wait( 50 );
+      next TRY;
+    }# end unless()
+    
+    if( $buffer ne 'ok' )
+    {
+      warn "Unexpected response '$buffer' from server";
+    }# end if()
+  }# end TRY
 }# end publish()
+
+
+#==============================================================================
+sub reconnect
+{
+  my $s = shift;
+  
+  eval { $s->{sock}->close() };
+  $s->{sock} = Socket::Class->new(
+    remote_addr => $s->{address},
+    remote_port => $s->{port},
+    proto       => 'tcp',
+  ) or die "Cannot connect to $s->{address}:$s->{port}: $!";
+}# end reconnect()
 
 
 #==============================================================================

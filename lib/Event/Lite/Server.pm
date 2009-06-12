@@ -195,8 +195,7 @@ sub publish_event
   {
     next unless grep { $_ eq $subs } keys %can_write;
     $subs->send( "$body\n\n" );
-  }# end foreach()
-  
+  }# end foreach()  
 }# end publish_event()
 
 

@@ -48,16 +48,16 @@ sub subscribe
   }# end if()
   
   $s->{worker} = threads->create(sub {
-    my $sock = Socket::Class->new(
-      remote_addr => $s->{address},
-      remote_port => $s->{port},
-      proto       => 'tcp',
-    ) or die "Cannot connect: $!";
-    $sock->send("subscribe/$args{event}:$credentials");
+    my $sock = $s->connect( $args{event}, $credentials );
     
     LOOP: while( 1 ) {
       last unless $SUBSCRIBED;
       my $buffer;
+      unless( $sock && $sock->remote_addr() )
+      {
+        eval { $sock->close } if $sock;
+        $sock = $s->connect( $args{event}, $credentials )
+      }# end unless()
       my $got = $sock->read( $buffer, 1024 ** 2 );
       if( ! defined($got) )
       {
@@ -97,6 +97,22 @@ sub subscribe
     }# end while()
   });
 }# end subscribe()
+
+
+#==============================================================================
+sub connect
+{
+  my ($s, $event, $credentials) = @_;
+
+  my $sock = Socket::Class->new(
+    remote_addr => $s->{address},
+    remote_port => $s->{port},
+    proto       => 'tcp',
+  ) or die "Cannot connect: $!";
+  $sock->send("subscribe/$event:$credentials");
+  
+  return $sock;
+}# end connect()
 
 
 #==============================================================================

@@ -50,13 +50,17 @@ my $publisher = Event::Lite::Publisher->new(
 );
 
 #my $start = gettimeofday();
-my $max = 500;
+my $max = 50;
 $publisher->publish(
   event => 'test-event',
   number  => $_,
 ) for 1..$max;
 
-usleep(10_000) while scalar(keys(%events)) < ( $max * $max_subscribers );
+while( scalar(keys(%events)) < ( $max * $max_subscribers ) )
+{
+#  warn "Waiting..." . scalar(keys(%events));
+  usleep(10_000);
+}# end while()
 
 
 #my $diff = gettimeofday() - $start;

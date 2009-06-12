@@ -7,7 +7,7 @@ use warnings 'all';
 use base 'Exporter';
 use Event::Lite::Subscriber;
 use Event::Lite::Publisher;
-our $VERSION = '0.003';
+our $VERSION = '0.004';
 our @EXPORT = qw( addEventListener dispatchEvent );
 
 my $publisher;
@@ -25,7 +25,7 @@ sub server
   my ($class, $server, $user, $pass) = @_;
   
   my ($addr,$port) = split /:/, $server;
-  die "Usage: $class\->server( 'hostname:port' [, username, password ] )"
+  warn "Usage: $class\->server( 'hostname:port' [, username, password ] )"
     unless $addr && $port;
   $username = $user;
   $password = $pass;
@@ -38,12 +38,6 @@ sub server
     };
   }# end if()
   
-  $publisher = Event::Lite::Publisher->new(
-    address   => $addr,
-    port      => $port,
-    username  => $username,
-    password  => $password,
-  );
   $server_address = $addr;
   $server_port    = $port;
   
@@ -81,6 +75,12 @@ sub dispatchEvent
   
   $args{event} or die "Usage: dispatchEvent( event => 'event-name, [ \%other_args ] )";
   
+  $publisher ||= Event::Lite::Publisher->new(
+    address   => $server_address,
+    port      => $server_port,
+    username  => $username,
+    password  => $password,
+  );
   $publisher->publish(
     %args
   );
