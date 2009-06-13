@@ -53,8 +53,8 @@ sub publish
 
   unless( eval { $s->{sock} && $s->{sock}->remote_addr } )
   {
-    $s->reconnect()
-      or die "Cannot reconnect!";
+    $s->reconnect() or return;
+#      or die "Cannot reconnect!";
   }# end unless()
   
   $s->{sock}->send($msg, 0x8);
@@ -93,7 +93,7 @@ sub reconnect
     remote_addr => $s->{address},
     remote_port => $s->{port},
     proto       => 'tcp',
-  ) or die "Cannot connect to $s->{address}:$s->{port}: $!";
+  );# or die "Cannot connect to $s->{address}:$s->{port}: $!";
 }# end reconnect()
 
 
@@ -102,7 +102,7 @@ sub stop
 {
   my $s = shift;
   
-  $s->{sock}->close();
+  eval { $s->{sock}->close() } if $s->{sock};
 }# end stop()
 
 

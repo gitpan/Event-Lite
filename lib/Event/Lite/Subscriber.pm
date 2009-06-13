@@ -3,15 +3,18 @@ package Event::Lite::Subscriber;
 
 use strict;
 use warnings 'all';
-#use Carp 'confess';
 use Socket::Class;
-use forks;
-use forks::shared;
-#use Storable 'thaw';
 use JSON::XS;
 use MIME::Base64;
+use Time::HiRes qw( ualarm usleep );
 
-our $SUBSCRIBED : shared = 1;
+sub reaper {
+warn "Reaper...";
+  my $waitpid = wait;
+warn "$$: waitpid:$waitpid";
+  $SIG{CHLD} = \&reaper;
+}
+$SIG{CHLD} = 'IGNORE';
 
 
 #==============================================================================
@@ -41,62 +44,104 @@ sub subscribe
       unless defined($args{$_});
   }# end foreach()
   
+  map { $s->{$_} = $args{$_} } keys %args;
+  
+  if( my $pid = open( my $child, "|-") )
+  {
+    # Parent process - write to child:
+    $s->{child} = $child;
+    $s->{running} = 1;
+    return;
+  }
+  else
+  {
+    # Child process - read from parent:
+    die "cannot fork: $!" unless defined $pid;
+    $s->child_loop();
+    exit;
+  }# end if()
+}# end subscribe()
+
+
+#==============================================================================
+sub child_loop
+{
+  my $s = shift;
+
   my $credentials = '|';
   if( $s->{username} && $s->{password} )
   {
     $credentials = join '|', ( $s->{username}, $s->{password} );
   }# end if()
   
-  $s->{worker} = threads->create(sub {
-    my $sock = $s->connect( $args{event}, $credentials );
-    
-    LOOP: while( 1 ) {
-      last unless $SUBSCRIBED;
-      my $buffer;
-      unless( $sock && $sock->remote_addr() )
+  LOOP: while( 1 )
+  {
+    eval {
+      $s->{sock} = $s->connect( $s->{event}, $credentials )
+        unless $s->{sock} && $s->{sock}->remote_addr();
+    };
+    if( $@ )
+    {
+      warn $@;
+      last LOOP;
+    }# end if()
+
+    my $buffer;
+    my $got = $s->{sock}->read( $buffer, 1024 ** 2 );
+    if( ! defined($got) )
+    {
+      # We are disconnected:
+      last;
+    }
+    elsif( ! $got )
+    {
+      # No input yet - just wait:
+      $s->{sock}->wait( 50 );
+      next;
+    }
+    else
+    {
+      chomp($buffer);
+      if( $buffer eq 'ok' )
       {
-        eval { $sock->close } if $sock;
-        $sock = $s->connect( $args{event}, $credentials )
-      }# end unless()
-      my $got = $sock->read( $buffer, 1024 ** 2 );
-      if( ! defined($got) )
-      {
-        # We are disconnected:
-        $SUBSCRIBED = 0;
-        last;
+        # Yay - connected and authenticated.
       }
-      elsif( ! $got )
+      elsif( $buffer eq 'permission denied' )
       {
-        # No input yet - just wait:
-        $sock->wait( 50 );
-        next;
+        # Denied access:
+        warn "Permission denied";
+        last LOOP;
       }
       else
       {
-        chomp($buffer);
-        if( $buffer eq 'ok' )
+        foreach my $msg ( grep { $_ } split /\n\n/, $buffer )
         {
-          # Yay - connected and authenticated.
-        }
-        elsif( $buffer eq 'permission denied' )
-        {
-          # Denied access:
-          warn "Permission denied";
-          lock($SUBSCRIBED);
-          $SUBSCRIBED = 0;
-          last LOOP;
-        }
-        else
-        {
-          foreach my $msg ( grep { $_ } split /\n\n/, $buffer )
-          {
-            $args{callback}->( $s->{json}->decode( decode_base64( $msg ) ) );
-          }# end foreach()
-        }# end if()
+          $s->{callback}->( $s->{json}->decode( decode_base64( $msg ) ) );
+        }# end foreach()
       }# end if()
-    }# end while()
-  });
-}# end subscribe()
+    }# end if()
+  }# end while()
+}# end child_loop()
+
+
+#==============================================================================
+sub running
+{
+  my $s = shift;
+  
+  return unless $s->{child};
+  return kill( 0 => $s->{child} );
+}# end running()
+
+
+#==============================================================================
+sub stop
+{
+  my $s = shift;
+  
+  return unless $s->{child};
+  kill( SIGTERM => $s->{child} );
+}# end stop()
 
 
 #==============================================================================
@@ -116,20 +161,10 @@ sub connect
 
 
 #==============================================================================
-sub stop
-{
-  my $s = shift;
-  
-  $SUBSCRIBED = 0;
-  $s->{worker}->detach;
-}# end stop()
-
-
-#==============================================================================
 sub DESTROY
 {
   my $s = shift;
-  eval { $s->stop() } if $s->{worker};
+  $s->stop;
   undef(%$s);
 }# end DESTROY()
 

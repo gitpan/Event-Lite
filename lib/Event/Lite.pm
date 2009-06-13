@@ -7,7 +7,7 @@ use warnings 'all';
 use base 'Exporter';
 use Event::Lite::Subscriber;
 use Event::Lite::Publisher;
-our $VERSION = '0.004';
+our $VERSION = '0.005';
 our @EXPORT = qw( addEventListener dispatchEvent );
 
 my $publisher;
@@ -64,7 +64,7 @@ sub addEventListener
     callback  => $args{callback},
   );
   push @{$instance->{subs}}, $sub;
-#  push @subscribers, $sub;
+  return $sub;
 }# end addEventListener()
 
 
@@ -92,6 +92,9 @@ sub DESTROY
 {
   my $s = shift;
   map { eval { $_->DESTROY } } @{$s->{subs}};
+  $publisher->stop
+    if $publisher;
+  undef(%$s);
 }# end DESTROY()
 
 

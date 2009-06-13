@@ -1,5 +1,9 @@
 Revision history for Perl extension Event::Lite.
 
+0.005   2009-06-12
+  - Subscriber no longer uses the "forks" or "forks::shared" modules.
+  - Performance increased up to 2,500 events per second.
+
 0.002   2009-06-10
   - Server, publisher and subscriber all work.
   - Performance clocked on my laptop (Lenovo Y530) at:
