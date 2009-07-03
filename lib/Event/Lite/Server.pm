@@ -3,7 +3,6 @@ package Event::Lite::Server;
 
 use strict;
 use warnings 'all';
-#use Carp 'confess';
 use IO::Socket::INET;
 use IO::Select;
 use forks;
@@ -58,7 +57,7 @@ sub run
           $read_set->add( $rh->accept() );
         }# end if()
         
-        {
+        SCOPE:{
           # Message from existing socket:
           my $buffer;
           $rh->recv($buffer, 1024 ** 2);
@@ -115,7 +114,7 @@ sub run
             $read_set->remove( $rh );
             close($rh);
           }# end if()
-        }# end if()
+        };
       }# end foreach()
       
     }# end while()
@@ -208,7 +207,7 @@ sub stop
     lock($RUNNING);
     $RUNNING = 0;
   };
-  $s->{worker}->join;
+  eval { $s->{worker}->join };
 }# end stop()
 
 
@@ -226,4 +225,162 @@ sub DESTROY
 }# end DESTROY()
 
 1;# return true:
+
+=pod
+
+=head1 NAME
+
+Event::Lite::Server - Event dispatch server
+
+=head1 SYNOPSIS
+
+=head2 Basic Server
+
+  use Event::Lite::Server;
+  
+  my $server = Event::Lite::Server->new(
+    address => '127.0.0.1',
+    port    => 34343,
+  );
+  $server->run();
+  
+  # Do stuff...
+  think();
+  
+  # Or even:
+  $SIG{TERM} = $SIG{INT} = sub {
+    $server->stop();
+  };
+  
+  #Finally:
+  $server->stop();
+
+=head2 More Secure Server
+
+  use Event::Lite::Server;
+  
+  my $server = Event::Lite::Server->new(
+    address                     => '127.0.0.1',
+    port                        => 34343,
+    on_authenticate_subscriber  => \&check_subscriber,
+    on_authenticate_publisher   => \&check_publisher,
+  );
+  $server->run();
+  
+  # Do stuff...
+  think();
+  
+  # Or even:
+  $SIG{TERM} = $SIG{INT} = sub {
+    $server->stop();
+  };
+  
+  #Finally:
+  $server->stop();
+  
+  sub check_subscriber {
+    my ($socket, $event_type, $username, $password) = @_;
+    
+    # Return a true value to authorize:
+    if( $username eq 'admin' && $password eq 'swordfish' )
+    {
+      # Permission granted:
+      return 1;
+    }
+    else
+    {
+      # Permission denied:
+      return 0;
+    }# end if()
+  }
+  
+  sub check_publisher {
+    my ($socket, $event_type, $username, $password) = @_;
+    
+    # Return a true value to authorize:
+    if( $username eq 'admin' && $password eq 'swordfish' )
+    {
+      # Permission granted:
+      return 1;
+    }
+    else
+    {
+      # Permission denied:
+      return 0;
+    }# end if()
+  }
+
+=head1 DESCRIPTION
+
+C<Event::Lite::Server> does only one thing: Dispatch events from "publishers"
+to "subscribers" - nothing more, nothing less.
+
+The other details (i.e. security) are left up to you, the user.
+
+=head1 TECH SPECS
+
+=head2 Performance
+
+Depending on the size of the event, the number of subscribers and network latency,
+performance could range anywhere from 100 to 1,000 events per second.  YMMV.
+
+"Patches Welcome"
+
+=head2 Protocol
+
+C<Event::Lite> uses a simple text-based protocol.  The event body is base64-encoded
+JSON.  Internaly, L<JSON::XS> is used to encode and decode the data.
+
+=head3 Subscribe
+
+A subscribe request looks like this:
+
+  subscribe/event-name:username|password
+
+So, to subscribe to events named "foo" you would send:
+
+  subscribe/foo:admin|swordfish
+
+=head3 Publish
+
+A publish request looks like this:
+
+  publish/event-name:username|password
+  
+  <base64-encoded JSON>
+
+So, to publish an event named "foo" you would send:
+
+  publish/foo:admin|swordfish
+  
+  AB384dsd93jk4j2h3g4jh23g4jh2g34jhg234jhg23jh4g==
+
+=head3 Receiving an Event
+
+When a subscriber receives an event that it has subscribed to, that event is just
+the base64-encoded JSON.
+
+  AB384dsd93jk4j2h3g4jh23g4jh2g34jhg234jhg23jh4g==
+
+Decoding it and parsing the resulting JSON will result in the event object itself.
+
+=head1 SUPPORT
+
+Visit L<http://www.devstack.com/contact/> or email the author at <jdrago_999@yahoo.com>
+
+Commercial support and installation is available.
+
+=head1 AUTHOR
+
+John Drago <jdrago_999@yahoo.com>
+ 
+=head1 COPYRIGHT AND LICENSE
+
+Copyright (C) 2008 by John Drago
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself, either Perl version 5.10.0 or,
+at your option, any later version of Perl 5 you may have available.
+
+=cut
 

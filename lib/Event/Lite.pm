@@ -3,11 +3,10 @@ package Event::Lite;
 
 use strict;
 use warnings 'all';
-#use Carp 'confess';
 use base 'Exporter';
 use Event::Lite::Subscriber;
 use Event::Lite::Publisher;
-our $VERSION = '0.005';
+our $VERSION = '1.010';
 our @EXPORT = qw( addEventListener dispatchEvent );
 
 my $publisher;
@@ -223,43 +222,15 @@ to let it know when that kind of event happens.
 
 An object that describes the Who, What, When, Where, Why and How of what happened.
 
-Events are just simple hashrefs - not even blessed.
+Events are just simple hashrefs - not even blessed.  Do not attempt to pass blessed
+objects, filehandles, sockets or database connections inside of the event.
 
 =back
 
-=head2 Protocol
-
-=head3 Subscribe
-
-A subscribe request looks like this:
-
-  subscribe/event-name:username|password
-
-So, to subscribe to events named "foo" you would send:
-
-  subscribe/foo:admin|swordfish
-
-=head3 Publish
-
-A publish request looks like this:
-
-  publish/event-name:username|password
-  
-  <base64-encoded JSON>
-
-So, to publish an event named "foo" you would send:
-
-  publish/foo:admin|swordfish
-  
-  AB384dsd93jk4j2h3g4jh23g4jh2g34jhg234jhg23jh4g==
-
 =head1 PERFORMANCE
 
-As of version 0.003 C<Event::Lite> offers approximately 500 events per second when
-sending 100 small events (i.e. "hello world" events) to 10 subscribers on the same machine.
-
-The size of the event data, the number of subscribers, and network latency will
-slow that number down.
+Depending on the size of the event, the number of subscribers and network latency,
+performance could range anywhere from 100 to 1,000 events per second.  YMMV.
 
 =head1 BEST PRACTICES
 

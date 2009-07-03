@@ -3,10 +3,8 @@ package Event::Lite::Publisher;
 
 use strict;
 use warnings 'all';
-#use Carp 'confess';
 use Socket::Class;
 use JSON::XS;
-#use Storable qw( freeze );
 use MIME::Base64;
 
 
@@ -54,7 +52,6 @@ sub publish
   unless( eval { $s->{sock} && $s->{sock}->remote_addr } )
   {
     $s->reconnect() or return;
-#      or die "Cannot reconnect!";
   }# end unless()
   
   $s->{sock}->send($msg, 0x8);
@@ -65,9 +62,6 @@ sub publish
     unless( defined $got )
     {
       return;
-#      warn "Disconnecting";
-#      eval { $s->{sock}->close };
-#      last TRY;
     }# end unless()
     unless( $got )
     {
@@ -93,7 +87,7 @@ sub reconnect
     remote_addr => $s->{address},
     remote_port => $s->{port},
     proto       => 'tcp',
-  );# or die "Cannot connect to $s->{address}:$s->{port}: $!";
+  );
 }# end reconnect()
 
 
@@ -116,4 +110,83 @@ sub DESTROY
 }# end DESTROY()
 
 1;# return true:
+
+=pod
+
+=head1 NAME
+
+Event::Lite::Publisher - Send events to listeners
+
+=head1 SYNOPSIS
+
+  use Event::Lite::Publisher;
+  
+  my $publisher = Event::Lite::Publisher->new(
+    address => 'server.address.com',
+    port    => 34343,
+    
+    # The username/password are only necessary if required by the event server:
+    username  => 'admin',
+    password  => 'swordfish',
+  );
+  
+  $publisher->publish(
+    event => 'the.event.name.here',
+    
+    # Anything else is just passed along:
+    foo           => 'bar',
+    some_numbers  => [ 1..10 ],
+    a_hash        => { hello => 'world' },
+    nested        => {
+      even  => [ 2, 4, 6, 8 ],
+      odd   => [ 1, 3, 5, 7 ],
+      more  => [ ['a','b'], { a => 'word' } ],
+    },
+  );
+  
+  # Not ok:
+  $publisher->publish(
+    event       => 'event-name-here',
+    object      => CGI->new(),  # No
+    filehandle  => $ofh,        # No
+    db_handle   => $dbh,        # No
+    socket      => $sock,       # No
+  );
+  
+  # Works, but is not recommended:
+  $publisher->publish(
+    event => 'war-and-peace',
+    text  => "It was the best of times, it was the worst of times\n"x1_000_000
+  );
+  
+  # When you tire of publishing:
+  $publisher->stop();
+
+=head1 DESCRIPTION
+
+C<Event::Lite::Publisher> connects to an L<Event::Lite::Server> and sends your
+events to it.
+
+Operative word here is B<events>, not B<huge chunks of data>.  While it is possible
+to send enourmous chunks of data, it's not recommended.  Performance will degrade.
+
+=head1 SUPPORT
+
+Visit L<http://www.devstack.com/contact/> or email the author at <jdrago_999@yahoo.com>
+
+Commercial support and installation is available.
+
+=head1 AUTHOR
+
+John Drago <jdrago_999@yahoo.com>
+ 
+=head1 COPYRIGHT AND LICENSE
+
+Copyright (C) 2008 by John Drago
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself, either Perl version 5.10.0 or,
+at your option, any later version of Perl 5 you may have available.
+
+=cut
 

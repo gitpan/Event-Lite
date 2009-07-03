@@ -1,0 +1,35 @@
+#!/usr/bin/perl -w
+
+use strict;
+use warnings 'all';
+use Event::Lite::Server;
+
+my $port = shift(@ARGV)
+  or die "Usage: nohup $0 <port> > event.log &";
+
+my $server = Event::Lite::Server->new(
+  address => 'localhost',
+  port    => $port,
+);
+
+$SIG{INT} = $SIG{TERM} = sub {
+  return unless $server->running;
+  warn "eventlited: Shutting down...\n";
+  $server->stop();
+};
+
+$SIG{HUP} = sub {
+  warn "eventlited: Restarting server on port $port...\n";
+  $server->stop();
+  $server->run();
+};
+
+warn "eventlited: Starting server on port $port...\n";
+
+$server->run();
+
+sleep(1) while 1;
+
+# Fell out of loop:
+$server->stop();
+

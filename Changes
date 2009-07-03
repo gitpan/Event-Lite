@@ -1,5 +1,8 @@
 Revision history for Perl extension Event::Lite.
 
+1.010   2009-06-19
+  - Public API is stable and no known bugs.  I call it v1.0+.
+
 0.005   2009-06-12
   - Subscriber no longer uses the "forks" or "forks::shared" modules.
   - Performance increased up to 2,500 events per second.
